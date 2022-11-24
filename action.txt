@@ -1,0 +1,8 @@
+*Action:
+0-51: attack or defense card with index respectively:
+    0-12: Two Spade - Ace Spade
+    13-25: Two Club - Ace Club
+    26-38: Two Diamond - Ace Diamond
+    39-51: Two Heart - Ace Heart
+
+52: skip turn (attacker) or defend fail(defender).

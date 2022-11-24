@@ -1,0 +1,7 @@
+*State:
+state[0:52] = {"1":have that card,"0":dont have that card} (index of the card)
+state[52:104] = {"1":card defend successful(being defend),"0":not or dont have to}
+state[104:156] = {"1":card have to defend this round}
+state[156:158] = [1,0] ("attack","defense") 
+state[158:162] = [1,0,0,0] (trump suit)
+state[162] = num card left on deck
