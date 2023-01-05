@@ -1,1 +1,1 @@
-# Durak
+# Game bài tấn.

@@ -169,7 +169,7 @@ def checkEnded(env):
             return -1
     return -1
 
-def run(listAgent,perData):
+def one_game(listAgent,perData):
     env = initEnv()
     tempData = []
     for _ in range(4):
@@ -214,7 +214,7 @@ def run(listAgent,perData):
             break
     return winner, perData
 @njit
-def numbaRun(p0, p1, p2, p3, perData, pIdOrder):
+def numba_one_game(p0, p1, p2, p3, perData, pIdOrder):
     env = initEnv()
     tempData = []
     for _ in range(4):
@@ -248,25 +248,25 @@ def numbaRun(p0, p1, p2, p3, perData, pIdOrder):
     return winner, perData
         
 # @njit
-def main(listAgent, times, perData):
+def normal_main(listAgent, times, perData):
     numWin = np.full(5, 0)
     pIdOrder = np.arange(4)
     for _ in range(times):
         np.random.shuffle(pIdOrder)
         shuffledListAgent = [listAgent[i] for i in pIdOrder]
-        winner, perData = run(shuffledListAgent, perData)
+        winner, perData = one_game(shuffledListAgent, perData)
         if winner == -1:
             numWin[4] += 1
         else:
             numWin[pIdOrder[winner]] += 1
     return numWin, perData
 @njit
-def numbaMain(p0, p1, p2, p3, times, perData):
+def numba_main(p0, p1, p2, p3, times, perData):
     numWin = np.full(5, 0)
     pIdOrder = np.arange(4)
     for _ in range(times):
         np.random.shuffle(pIdOrder)
-        winner, perData = numbaRun(p0, p1, p2, p3, perData, pIdOrder)
+        winner, perData = numba_one_game(p0, p1, p2, p3, perData, pIdOrder)
         if winner == -1:
             numWin[4] += 1
         else:
