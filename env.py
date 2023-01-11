@@ -11,7 +11,7 @@ warnings.simplefilter('ignore', category=NumbaPendingDeprecationWarning)
 warnings.simplefilter('ignore', category=NumbaWarning)
 @njit
 def initEnv():
-    env = np.zeros(80)
+    env = np.zeros(81)
     card = np.arange(52)#card
     np.random.shuffle(card)
     for i in range(4):
@@ -23,10 +23,11 @@ def initEnv():
     env[58] = 2 #player_id defending
     env[59] = 0 #index player attack in env[54:57]
     env[60:80] = card[32:52] #card on deck
+    env[80] = 0
     return env
 @jit
 def getStateSize():
-    return 166
+    return 167
 @jit
 def getAgentSize():
     return 4
@@ -53,6 +54,7 @@ def getAgentState(env):
         else:
             state[163+k] = np.where(env[0:52]==i)[0].shape[0]  #num card other player have on hand
             k+=1
+    state[166] = env[80]
     return state
 
 @jit
@@ -172,6 +174,7 @@ def checkEnded(env):
             else:
                 pass
         if len(list_win)>0:
+            
             return int(list_win[0]-1)
         else:
             return -1
@@ -179,7 +182,7 @@ def checkEnded(env):
 
 @jit
 def getReward(state):
-    if state[162]==0:
+    if state[162]==0 and state[166]==1:
         if np.sum(state[0:52])==0:
             return 1
         elif np.min(state[163:166])==0:
@@ -207,9 +210,10 @@ def one_game(listAgent,perData):
         winner = checkEnded(env)
         if winner != -1:
             break
+    env[80] = 1
     for i in range(4):
         env[53] = 1
-        env[58] = i
+        env[58] = i+1
         action, perData = listAgent[i](getAgentState(env), perData)
     return winner, perData
 @jit()
@@ -237,10 +241,10 @@ def numba_one_game(p0, p1, p2, p3, perData, pIdOrder):
         winner = checkEnded(env)
         if winner != -1:
             break
-    
+    env[80] = 1
     for p_idx in range(4):
         env[53] = 1
-        env[58] = p_idx
+        env[58] = p_idx+1
         p_state = getAgentState(env)
         if pIdOrder[p_idx] == 0:
             act, perData = p0(p_state, perData)
@@ -303,12 +307,14 @@ def one_game_numba(p0,pIdOrder,per_player,per1,per2,per3,p1,p2,p3):
         winner = checkEnded(env)
         if winner != -1:
             break
+    env[80] = 1
     for idx in range(4):
         if pIdOrder[idx] == -1:
             env[53] = 1
-            env[58] = idx * 1.0
+            env[58] = idx * 1.0 + 1.0
             p_state = getAgentState(env)
             act, per_player = p0(p_state, per_player)
+            break
 
     win = False        
     if np.where(pIdOrder == -1)[0][0] == checkEnded(env): 

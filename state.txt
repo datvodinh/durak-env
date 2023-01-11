@@ -5,3 +5,5 @@ state[104:156] = {"1":card have to defend this round}
 state[156:158] = [1,0] ("attack","defense") 
 state[158:162] = [1,0,0,0] (trump suit)
 state[162] = num card left on deck
+state{163:166} = num card left each player
+state[166]: end game
