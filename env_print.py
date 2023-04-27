@@ -1,8 +1,14 @@
 import numpy as np
-from numba import njit
+from numba import njit,jit
 import numba
 from numba.typed import List
 import sys
+from numba.core.errors import NumbaDeprecationWarning, NumbaPendingDeprecationWarning,NumbaWarning
+import warnings
+
+warnings.simplefilter('ignore', category=NumbaDeprecationWarning)
+warnings.simplefilter('ignore', category=NumbaPendingDeprecationWarning)
+warnings.simplefilter('ignore', category=NumbaWarning)
 value = np.array(['2','3','4','5','6','7','8','9','10','J','Q','K','A'])
 type_card = np.array(['♤','♧','♢','♡'])
 # @njit
@@ -13,9 +19,10 @@ def get_card(id):
             return f'{value[v]}{type_card[t]}'
         else:
             return 'skip'
+        
 @njit
 def initEnv():
-    env = np.zeros(80)
+    env = np.zeros(81)
     card = np.arange(52)#card
     np.random.shuffle(card)
     for i in range(4):
@@ -27,10 +34,14 @@ def initEnv():
     env[58] = 2 #player_id defending
     env[59] = 0 #index player attack in env[54:57]
     env[60:80] = card[32:52] #card on deck
+    env[80] = 0
     return env
 @njit
 def getStateSize():
-    return 163
+    return 167
+@njit
+def getAgentSize():
+    return 4
 @njit
 def getAgentState(env):
     state = np.zeros(getStateSize())
@@ -47,6 +58,14 @@ def getAgentState(env):
         state[156:158] = [1,0]
     state[158:162][int(env[52])//13] = 1 #trump suit
     state[162] = len(np.where(env[0:52]==0)[0]) #num card on deck
+    k = 0
+    for i in range(1,5):
+        if i==player_id:
+            pass
+        else:
+            state[163+k] = np.where(env[0:52]==i)[0].shape[0]  #num card other player have on hand
+            k+=1
+    state[166] = env[80]
     return state
 
 @njit
@@ -75,7 +94,7 @@ def getAttackCard(state):
             card[c] = 1
     return card
 @njit
-def getValidAction(state):
+def getValidActions(state):
     list_action = np.zeros(getActionSize())
     #attack
     if state[156]==1 and np.sum(state[52:104])==0: #main attacker, defender have nothing to defend yet.
@@ -86,6 +105,8 @@ def getValidAction(state):
     #defense
     if state[157]==1:#defender
         list_action[0:52] = getDefenseCard(state)
+        list_action[52] = 1
+    if np.sum(list_action)==0:
         list_action[52] = 1
     return list_action
 @njit
@@ -118,8 +139,8 @@ def changeAttackPlayer(env): #change the defender and attacker
 def stepEnv(action,env):
     if action == 52:#skip
         if env[53] == 1: #defense
-            env[0:52][np.where(env[0:52]==5)] = env[58] #Attacker hold all card
-            env[0:52][np.where(env[0:52]==6)] = env[58] #Attacker hold all card
+            env[0:52][np.where(env[0:52]==5)] = env[58] #Defender hold all card
+            env[0:52][np.where(env[0:52]==6)] = env[58] #Defender hold all card
             env = drawCard(env) #draw card
             env[58] = (env[58]+2)%4 if env[58] > 2 else env[58]+2 #change defend player
             changeAttackPlayer(env) #change attack player
@@ -146,7 +167,7 @@ def stepEnv(action,env):
             env[action] = 5 #this card have to defend
             env[53] = 1 #change mode: defend
             env[57] = 0 #change num player attack skip turn to 0
-            env[59]  = (env[59]+1)%3 #change attack player
+            env[59]  = 0 #change attack player
             
     # return env
 
@@ -154,48 +175,41 @@ def stepEnv(action,env):
 @njit
 def checkEnded(env):
     if len(np.where(env[0:52]==0)[0])==0:#if no card left on deck
-        list_win = []
-        turn_draw_card = np.zeros(4)
-        turn_draw_card[np.array([0,2,3])] = env[54:57]
-        turn_draw_card[1] = env[58]
-        for p_id in turn_draw_card:
-            if len(np.where(env[0:52]==p_id)[0]) == 0: #if player have no card left
-                list_win.append(p_id)
-            else:
-                pass
-        if len(list_win)>0:
-            return int(list_win[0]-1)
-        else:
-            return -1
+        for i in range(1,5):
+            if len(np.where(env[0:52]==i)[0]) == 0:
+                return i - 1
     return -1
 
-def one_game(listAgent,perData):
+@njit
+def getReward(state):
+    if state[162]==0 and state[166]==1:
+        if np.sum(state[0:52])==0:
+            return 1
+        elif  np.min(state[163:166])==0:
+            return 0
+        else:
+            return -1
+    else:
+        return -1
+@njit()
+def one_game_numba(p0,pIdOrder,per_player,per1,per2,per3,p1,p2,p3):
     env = initEnv()
-    tempData = []
-    for _ in range(4):
-        dataOnePlayer = List()
-        dataOnePlayer.append(np.array([[0.]]))
-        tempData.append(dataOnePlayer)
-    print(env[:53])
     winner = -1
     turn = 0
     while True:
-        for i in range(1,5):
-            print(f'P{i}:',end=" ")
-            for card in np.where(env[0:52]==i)[0]:
-                print(get_card(card),end=" ")
-            print("")
-        print(f'Turn {turn}; Trump card: {get_card(int(env[52]))}; Defend id: {env[58]}; Attack id :{env[54:57][int(env[59])]};',end=" ")
         turn +=1
-        if env[53]==1:#defense
+        if env[53]==1: #defend
             pIdx = int(env[58] - 1)
-            print(f'Player: {pIdx+1} is defending;',end=" ")
-            
-
-        else:#attack
+        else:# attack
             pIdx = int(env[54:57][int(env[59])] - 1)
-            print(f'Player: {pIdx+1} is attacking;',end=" ")
-        action, tempData[pIdx], perData = listAgent[pIdx](getAgentState(env), tempData[pIdx], perData)
+        if pIdOrder[pIdx] == -1:
+            action, per_player = p0(getAgentState(env), per_player)
+        elif pIdOrder[pIdx] == 1:
+            action, per1 = p1(getAgentState(env), per1)
+        elif pIdOrder[pIdx] == 2:
+            action, per2 = p2(getAgentState(env), per2)
+        elif pIdOrder[pIdx] == 3:
+            action, per3 = p3(getAgentState(env), per3)
         print(f'Action index: {get_card(action)};',end=" ")
         if env[53]==1:
             if action==52:
@@ -207,78 +221,220 @@ def one_game(listAgent,perData):
                 print("Player skip")
             else:
                 print("Player attack")
-        stepEnv(action, env)
-        # print(env[:53])
-        winner = checkEnded(env)
-        if winner != -1:
-            break
-    return winner, perData
-@njit
-def numba_one_game(p0, p1, p2, p3, perData, pIdOrder):
-    env = initEnv()
-    tempData = []
-    for _ in range(4):
-        dataOnePlayer = List()
-        dataOnePlayer.append(np.array([[0.]]))
-        tempData.append(dataOnePlayer)
-    
-    winner = -1
-    while True:
-        if env[53]==0:
-            pIdx = int(env[58] - 1)
-        else:
-            pIdx = int(env[54:57][int(env[59])] - 1)
-        try:
-            if pIdOrder[pIdx] == 0:
-                action, tempData[pIdx], perData = p0(getAgentState(env), tempData[pIdx], perData)
-            elif pIdOrder[pIdx] == 1:
-                action, tempData[pIdx], perData = p1(getAgentState(env), tempData[pIdx], perData)
-            elif pIdOrder[pIdx] == 2:
-                action, tempData[pIdx], perData = p2(getAgentState(env), tempData[pIdx], perData)
-            elif pIdOrder[pIdx] == 3:
-                action, tempData[pIdx], perData = p3(getAgentState(env), tempData[pIdx], perData)
-        except:
-            print(list(env))
-            break
-        stepEnv(action, env)
-        winner = checkEnded(env)
-        if winner != -1:
-            break
-    
-    return winner, perData
+        stepEnv(action,env)
         
-# @njit
-def normal_main(listAgent, times, perData):
-    numWin = np.full(5, 0)
-    pIdOrder = np.arange(4)
-    for _ in range(times):
-        np.random.shuffle(pIdOrder)
-        shuffledListAgent = [listAgent[i] for i in pIdOrder]
-        winner, perData = one_game(shuffledListAgent, perData)
-        if winner == -1:
-            numWin[4] += 1
-        else:
-            numWin[pIdOrder[winner]] += 1
-    return numWin, perData
-@njit
-def numba_main(p0, p1, p2, p3, times, perData):
-    numWin = np.full(5, 0)
-    pIdOrder = np.arange(4)
-    for _ in range(times):
-        np.random.shuffle(pIdOrder)
-        winner, perData = numba_one_game(p0, p1, p2, p3, perData, pIdOrder)
-        if winner == -1:
-            numWin[4] += 1
-        else:
-            numWin[pIdOrder[winner]] += 1
-    return numWin, perData
+        winner = checkEnded(env)
+        if winner != -1:
+            # print(winner)
+            break
+    env[80] = 1
+    # env[0:52] = 6
+    for pIdx in range(4):
+        env[53] = 1
+        env[58] = pIdx * 1.0 + 1.0
+        if pIdOrder[pIdx] == -1:
+            action, per_player = p0(getAgentState(env), per_player)
+        elif pIdOrder[pIdx] == 1:
+            action, per1 = p1(getAgentState(env), per1)
+        elif pIdOrder[pIdx] == 2:
+            action, per2 = p2(getAgentState(env), per2)
+        elif pIdOrder[pIdx] == 3:
+            action, per3 = p3(getAgentState(env), per3)
+
+    win = False        
+    if np.where(pIdOrder == -1)[0][0] == checkEnded(env): 
+        win = True
+    else: 
+        win = False
+
+    
+            # # print('ok')
+    return win, per_player
+
+@njit()
+def n_game_numba(p0, num_game, per_player, list_other, per1, per2, per3, p1, p2, p3):
+    win = 0
+    for _n in range(num_game):
+        np.random.shuffle(list_other)
+        winner,per_player  = one_game_numba(p0, list_other, per_player, per1, per2, per3, p1, p2, p3)
+        # print(winner)
+        win += winner
+    return win, per_player
+
+import importlib.util, json, sys
+from setup import SHORT_PATH
+
+def load_module_player(player):
+    return  importlib.util.spec_from_file_location('Agent_player', f"{SHORT_PATH}Agent/{player}/Agent_player.py").loader.load_module()
+
+@njit()
+def random_Env(p_state, per):
+    arr_action = getValidActions(p_state)
+    arr_action = np.where(arr_action == 1)[0]
+    act_idx = np.random.randint(0, len(arr_action))
+    return arr_action[act_idx], per
 
 @njit
-def ramdom_player(state,temp,per):
-    list_action  = np.where(getValidAction(state)==1)[0]
+def random_player1(state,per):
+    list_action  = np.where(getValidActions(state)==1)[0]
     action = np.random.choice(list_action)
-    # print(list(state))
-    # print(f'List action: {list_action}',end=" ")
-    return action,temp,per
-main([ramdom_player,ramdom_player,ramdom_player,ramdom_player],1,0)
-# numbaMain(ramdom_player,ramdom_player,ramdom_player,ramdom_player,500000,0)
+    if getReward(state) != -1:
+        per[0] += 1
+
+    return action,per
+@njit
+def random_player(state,per):
+    list_action  = np.where(getValidActions(state)==1)[0]
+    action = np.random.choice(list_action)
+    return action,per
+    
+@njit()
+def check_run_under_njit(Agent):
+    return True
+
+def one_game_normal(p0,pIdOrder,per_player,per1,per2,per3,p1,p2,p3):
+    env = initEnv()
+    winner = -1
+    turn = 0
+    while True:
+        
+        for i in range(1,5):
+            print(f'P{i}:',end=" ")
+            for card in np.where(env[0:52]==i)[0]:
+                print(get_card(card),end=" ")
+            print("")
+        print(f'Turn {turn}; Trump card: {get_card(int(env[52]))}; Defend id: {env[58]}; Attack id :{env[54:57][int(env[59])]};',end=" ")
+        turn +=1
+        if env[53]==1:
+            pIdx = int(env[58] - 1)
+            print(f'Player: {pIdx+1} is defending;')
+        else:
+            pIdx = int(env[54:57][int(env[59])] - 1)
+            print(f'Player: {pIdx+1} is attacking;')
+        if pIdOrder[pIdx] == -1:
+            action, per_player = p0(getAgentState(env), per_player)
+        elif pIdOrder[pIdx] == 1:
+            action, per1 = p1(getAgentState(env), per1)
+        elif pIdOrder[pIdx] == 2:
+            action, per2 = p2(getAgentState(env), per2)
+        elif pIdOrder[pIdx] == 3:
+            action, per3 = p3(getAgentState(env), per3)
+        print(f'List action: [',end="")
+        for card in np.where(getValidActions(getAgentState(env))==1)[0]:
+            print(get_card(card),end=" ")
+        print("]")
+        print(f'Action index: {get_card(action)};',end=" ")
+        if env[53]==1:
+            if action==52:
+                print("Defend Fail")
+            else:
+                print("Defend successful")
+        else:
+            if action==52:
+                print("Player skip")
+            else:
+                print("Player attack")
+        stepEnv(action,env)
+        print()
+        print('---------------------------------------')
+        print()
+        winner = checkEnded(env)
+        if winner != -1:
+            print(f'Winner: {winner}')
+            break
+    env[80] = 1
+    # env[0:52] = 6
+    for pIdx in range(4):
+        env[53] = 1
+        env[58] = pIdx * 1.0 + 1.0
+        if pIdOrder[pIdx] == -1:
+            action, per_player = p0(getAgentState(env), per_player)
+        elif pIdOrder[pIdx] == 1:
+            action, per1 = p1(getAgentState(env), per1)
+        elif pIdOrder[pIdx] == 2:
+            action, per2 = p2(getAgentState(env), per2)
+        elif pIdOrder[pIdx] == 3:
+            action, per3 = p3(getAgentState(env), per3)
+
+    win = False        
+    if np.where(pIdOrder == -1)[0][0] == checkEnded(env): 
+        win = True
+    else: 
+        win = False
+
+    
+            # # print('ok')
+    return win, per_player
+
+def n_game_normal(p0, num_game, per_player, list_other, per1, per2, per3, p1, p2, p3):
+    win = 0
+    for _n in range(num_game):
+        np.random.shuffle(list_other)
+        winner,per_player  = one_game_normal(p0, list_other, per_player, per1, per2, per3, p1, p2, p3)
+        # print(winner)
+        win += winner
+    return win, per_player
+
+def numba_main_2(p0, num_game, per_player, level, *args):
+    num_bot = getAgentSize() - 1
+    list_other = np.array([1, 2, 3, -1])
+    try: check_njit = check_run_under_njit(p0)
+    except: check_njit = False
+
+    if "_level_" not in globals():
+        global _level_
+        _level_ = level
+        init = True
+    else:
+        if _level_ != level:
+            _level_ = level
+            init = True
+        else:
+            init = False
+
+    if init:
+        global _list_per_level_
+        global _list_bot_level_
+        _list_per_level_ = []
+        _list_bot_level_ = []
+
+        if _level_ == 0:
+            _list_per_level_ = [np.array([[0.]], dtype=np.float64) for _ in range(num_bot)]
+            _list_bot_level_ = [bot_lv0 for _ in range(num_bot)]
+        else:
+            env_name = sys.argv[1]
+            if len(args) > 0:
+                dict_level = json.load(open(f'{SHORT_PATH}Log/check_system_about_level.json'))
+            else:
+                dict_level = json.load(open(f'{SHORT_PATH}Log/level_game.json'))
+
+            if str(_level_) not in dict_level[env_name]:
+                raise Exception('Hiện tại không có level này')
+
+            lst_agent_level = dict_level[env_name][str(level)][2]
+            lst_module_level = [load_module_player(lst_agent_level[i]) for i in range(num_bot)]
+            for i in range(num_bot):
+                data_agent_level = np.load(f'{SHORT_PATH}Agent/{lst_agent_level[i]}/Data/{env_name}_{level}/Train.npy',allow_pickle=True)
+                _list_per_level_.append(lst_module_level[i].convert_to_test(data_agent_level))
+                _list_bot_level_.append(lst_module_level[i].Test)
+
+    if check_njit:
+        return n_game_numba(p0, num_game, per_player, list_other,
+                                _list_per_level_[0], _list_per_level_[1], _list_per_level_[2],
+                                _list_bot_level_[0], _list_bot_level_[1], _list_bot_level_[2])
+    else:
+        return n_game_normal(p0, num_game, per_player, list_other,
+                                _list_per_level_[0], _list_per_level_[1], _list_per_level_[2],
+                                _list_bot_level_[0], _list_bot_level_[1], _list_bot_level_[2])
+
+
+@njit()
+def bot_lv0(state, perData):
+    validActions = getValidActions(state)
+    arr_action = np.where(validActions==1)[0]
+    idx = np.random.randint(0, arr_action.shape[0])
+    return arr_action[idx], perData
+
+print(n_game_normal(bot_lv0, 1, np.array([0.]), np.array([-1] + [i+1 for i in range(3)]),
+                                np.array([0.]), np.array([0.]), np.array([0.]),
+                                bot_lv0, bot_lv0, bot_lv0)[0])
