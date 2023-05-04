@@ -9,7 +9,18 @@ import warnings
 warnings.simplefilter('ignore', category=NumbaDeprecationWarning)
 warnings.simplefilter('ignore', category=NumbaPendingDeprecationWarning)
 warnings.simplefilter('ignore', category=NumbaWarning)
-@njit
+value = np.array(['2','3','4','5','6','7','8','9','10','J','Q','K','A'])
+type_card = np.array(['♤','♧','♢','♡'])
+# @njit()
+def get_card(id):
+        if id <52:
+            v = id%13
+            t = id//13
+            return f'{value[v]}{type_card[t]}'
+        else:
+            return 'skip'
+        
+@njit()
 def initEnv():
     env = np.zeros(81)
     card = np.arange(52)#card
@@ -25,13 +36,13 @@ def initEnv():
     env[60:80] = card[32:52] #card on deck
     env[80] = 0
     return env
-@njit
+@njit()
 def getStateSize():
     return 167
-@njit
+@njit()
 def getAgentSize():
     return 4
-@njit
+@njit()
 def getAgentState(env):
     state = np.zeros(getStateSize())
     if env[53]==0:
@@ -47,20 +58,17 @@ def getAgentState(env):
         state[156:158] = [1,0]
     state[158:162][int(env[52])//13] = 1 #trump suit
     state[162] = len(np.where(env[0:52]==0)[0]) #num card on deck
-    k = 0
-    for i in range(1,5):
-        if i==player_id:
-            pass
-        else:
-            state[163+k] = np.where(env[0:52]==i)[0].shape[0]  #num card other player have on hand
-            k+=1
+    state[163] = np.where(env[0:52]==env[55])[0].shape[0]
+    state[164] = np.where(env[0:52]==env[56])[0].shape[0]
+    state[165] = np.where(env[0:52]==env[54])[0].shape[0]
+        
     state[166] = env[80]
     return state
 
-@njit
+@njit()
 def getActionSize():
     return 53
-@njit
+@njit()
 def getDefenseCard(state):
     card = np.zeros(52)
     idx = np.argmax(state[158:162]) #trump suit: 0:spade,1:club,2:diamond,3:heart
@@ -72,7 +80,7 @@ def getDefenseCard(state):
         card[card_def_id+1:13*(idx+1)][np.where(state[card_def_id+1:13*(idx+1)]==1)] = 1 #higher value trump card only.
     return card
     
-@njit
+@njit()
 def getAttackCard(state):
     card = np.zeros(52)
     card_on_board = np.where(state[52:104]==1)[0]
@@ -82,7 +90,7 @@ def getAttackCard(state):
         if c%13 in card_value_on_board:
             card[c] = 1
     return card
-@njit
+@njit()
 def getValidActions(state):
     list_action = np.zeros(getActionSize())
     #attack
@@ -98,7 +106,7 @@ def getValidActions(state):
     if np.sum(list_action)==0:
         list_action[52] = 1
     return list_action
-@njit
+@njit()
 def drawCard(env):
     turn_draw_card = np.zeros(4)
     turn_draw_card[np.array([0,2,3])] = env[54:57] #attack player,main attack draw first.
@@ -114,7 +122,7 @@ def drawCard(env):
                 else:
                     env[env[60:80].astype(np.int64)[20-num_card_on_deck:]] = p_id
     return env
-@njit
+@njit()
 def changeAttackPlayer(env): #change the defender and attacker
     if env[58]==1:
         env[54:57] = [4,2,3]
@@ -124,26 +132,27 @@ def changeAttackPlayer(env): #change the defender and attacker
         env[54:57] = [2,4,1]
     elif env[58]==4:
         env[54:57] = [3,1,2]
-@njit
+    return env
+@njit()
 def stepEnv(action,env):
     if action == 52:#skip
         if env[53] == 1: #defense
             env[0:52][np.where(env[0:52]==5)] = env[58] #Defender hold all card
             env[0:52][np.where(env[0:52]==6)] = env[58] #Defender hold all card
             env = drawCard(env) #draw card
-            env[58] = (env[58]+2)%4 if env[58] > 2 else env[58]+2 #change defend player
-            changeAttackPlayer(env) #change attack player
+            env[58] = env[58] - 2 if env[58] > 2 else env[58]+2 #change defend player
+            env = changeAttackPlayer(env) #change attack player
             env[53] = 0 #reset mode: attack
             env[59] = 0
         elif env[53] == 0:#attack
             env[57] += 1 #num attacker skip this round
-            env[59]  = (env[59]+1)%3
+            env[59]  = (env[59]+1) % 3
             if env[57] == 3:#all attacker skip this round
                 env[0:52][np.where(env[0:52]==5)] = -1#Thrown away card
                 env[0:52][np.where(env[0:52]==6)] = -1#Thrown away card
                 env = drawCard(env) #draw card
                 env[58] = 1 if env[58]==4 else env[58]+1 #change defend player
-                changeAttackPlayer(env) #change attack players
+                env = changeAttackPlayer(env) #change attack players
                 env[57] = 0
                 env[59] = 0
                 
@@ -151,17 +160,15 @@ def stepEnv(action,env):
         if env[53] == 1:#defense
             env[0:52][np.where(env[0:52]==5)] = 6 #defense this card successful
             env[action] = 6
-            env[53] = 0#change mode: attack
+            env[53] = 0 #change mode: attack
         elif env[53] == 0: #attack
             env[action] = 5 #this card have to defend
             env[53] = 1 #change mode: defend
             env[57] = 0 #change num player attack skip turn to 0
-            env[59]  = 0 #change attack player
-            
-    # return env
+            env[59] = 0 #change attack player
 
 
-@njit
+@njit()
 def checkEnded(env):
     if len(np.where(env[0:52]==0)[0])==0:#if no card left on deck
         for i in range(1,5):
@@ -169,7 +176,7 @@ def checkEnded(env):
                 return i - 1
     return -1
 
-@njit
+@njit()
 def getReward(state):
     if state[162]==0 and state[166]==1:
         if np.sum(state[0:52])==0:
@@ -180,7 +187,7 @@ def getReward(state):
             return -1
     else:
         return -1
-@njit()
+@njit()()
 def one_game_numba(p0,pIdOrder,per_player,per1,per2,per3,p1,p2,p3):
     env = initEnv()
     winner = -1
@@ -199,6 +206,17 @@ def one_game_numba(p0,pIdOrder,per_player,per1,per2,per3,p1,p2,p3):
             action, per2 = p2(getAgentState(env), per2)
         elif pIdOrder[pIdx] == 3:
             action, per3 = p3(getAgentState(env), per3)
+        print(f'Action index: {get_card(action)};',end=" ")
+        if env[53]==1:
+            if action==52:
+                print("Defend Fail")
+            else:
+                print("Defend successful")
+        else:
+            if action==52:
+                print("Player skip")
+            else:
+                print("Player attack")
         stepEnv(action,env)
         
         winner = checkEnded(env)
@@ -229,7 +247,7 @@ def one_game_numba(p0,pIdOrder,per_player,per1,per2,per3,p1,p2,p3):
             # # print('ok')
     return win, per_player
 
-@njit()
+@njit()()
 def n_game_numba(p0, num_game, per_player, list_other, per1, per2, per3, p1, p2, p3):
     win = 0
     for _n in range(num_game):
@@ -245,14 +263,14 @@ from setup import SHORT_PATH
 def load_module_player(player):
     return  importlib.util.spec_from_file_location('Agent_player', f"{SHORT_PATH}Agent/{player}/Agent_player.py").loader.load_module()
 
-@njit()
+@njit()()
 def random_Env(p_state, per):
     arr_action = getValidActions(p_state)
     arr_action = np.where(arr_action == 1)[0]
     act_idx = np.random.randint(0, len(arr_action))
     return arr_action[act_idx], per
 
-@njit
+@njit()
 def random_player1(state,per):
     list_action  = np.where(getValidActions(state)==1)[0]
     action = np.random.choice(list_action)
@@ -260,13 +278,13 @@ def random_player1(state,per):
         per[0] += 1
 
     return action,per
-@njit
+@njit()
 def random_player(state,per):
     list_action  = np.where(getValidActions(state)==1)[0]
     action = np.random.choice(list_action)
     return action,per
     
-@njit()
+@njit()()
 def check_run_under_njit(Agent):
     return True
 
@@ -275,11 +293,20 @@ def one_game_normal(p0,pIdOrder,per_player,per1,per2,per3,p1,p2,p3):
     winner = -1
     turn = 0
     while True:
+        
+        for i in range(1,5):
+            print(f'P{i}:',end=" ")
+            for card in np.where(env[0:52]==i)[0]:
+                print(get_card(card),end=" ")
+            print("")
+        print(f'Turn {turn}; Trump card: {get_card(int(env[52]))}; Defend id: {env[58]}; Attack id :{env[54:57][int(env[59])]};',end=" ")
         turn +=1
         if env[53]==1:
             pIdx = int(env[58] - 1)
+            print(f'Player: {pIdx+1} is defending;')
         else:
             pIdx = int(env[54:57][int(env[59])] - 1)
+            print(f'Player: {pIdx+1} is attacking;')
         if pIdOrder[pIdx] == -1:
             action, per_player = p0(getAgentState(env), per_player)
         elif pIdOrder[pIdx] == 1:
@@ -288,10 +315,28 @@ def one_game_normal(p0,pIdOrder,per_player,per1,per2,per3,p1,p2,p3):
             action, per2 = p2(getAgentState(env), per2)
         elif pIdOrder[pIdx] == 3:
             action, per3 = p3(getAgentState(env), per3)
+        print(f'List action: [',end="")
+        for card in np.where(getValidActions(getAgentState(env))==1)[0]:
+            print(get_card(card),end=" ")
+        print("]")
+        print(f'Action index: {get_card(action)};',end=" ")
+        if env[53]==1:
+            if action==52:
+                print("Defend Fail")
+            else:
+                print("Defend successful")
+        else:
+            if action==52:
+                print("Player skip")
+            else:
+                print("Player attack")
         stepEnv(action,env)
-        
+        print()
+        print('---------------------------------------')
+        print()
         winner = checkEnded(env)
         if winner != -1:
+            print(f'Winner: {winner}')
             break
     env[80] = 1
     # env[0:52] = 6
@@ -379,9 +424,13 @@ def numba_main_2(p0, num_game, per_player, level, *args):
                                 _list_bot_level_[0], _list_bot_level_[1], _list_bot_level_[2])
 
 
-@njit()
+@njit()()
 def bot_lv0(state, perData):
     validActions = getValidActions(state)
     arr_action = np.where(validActions==1)[0]
     idx = np.random.randint(0, arr_action.shape[0])
     return arr_action[idx], perData
+
+print(n_game_normal(bot_lv0, 1, np.array([0.]), np.array([-1] + [i+1 for i in range(3)]),
+                                np.array([0.]), np.array([0.]), np.array([0.]),
+                                bot_lv0, bot_lv0, bot_lv0)[0])
